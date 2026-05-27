@@ -1,5 +1,5 @@
 name: axiom-official/saf-demo
-version: 0.1.1
+version: 0.1.2
 language: python
 description: |
   Self-Assembling Agent demo (EPIC-SAF-003 / ADR-051 / ADR-052).
