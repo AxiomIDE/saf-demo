@@ -59,34 +59,22 @@ def add_to_flow(ax: AxiomContext, input: ToolCandidates) -> MutationAck:
         iteration=input.iteration,
     )
 
-    # Find the loop-back edge target so we can wire (current → new tool
-    # → loop_target). The reasoner that started this iteration sits at
-    # position.current_instance; the AddToFlow node sits one or two
-    # hops downstream depending on the seed-flow shape. We use the
-    # loop_edges surface to find the destination instance that closes
-    # the loop back to the reasoner.
-    pos = ax.reflection.flow.position
-    loop_target = _find_loop_target(ax)
-    if loop_target is None:
-        ax.log.warn(
-            "AddToFlow could not resolve loop target — terminating",
-            current_instance=pos.current_instance,
-        )
-        return _terminate_no_loop(input, history)
-
+    # v1 / EPIC-SAF-003: the mutation primitive validates added-edge
+    # type compatibility strictly (mutationcompile/compile.go enforces
+    # srcOut == dstIn — see ADR-051). Arbitrary tools picked from the
+    # marketplace can't satisfy MutationAck → tool.input /
+    # tool.output → ReasonerIn around the loop, so v1 emits the
+    # AddedNode without add_edge calls. The candidate appears on the
+    # live-lineage canvas (which is the visible behaviour the demo is
+    # built to show — see ADR-052), without altering the runtime data
+    # path. A future ADR can add adapter-emitting mutation ops; until
+    # then, orphan-add is the safe primitive that exercises every
+    # part of the platform we care about (fork tx, GRAPH_MUTATED
+    # events, mutation_seq advancement, sidebar entries).
     try:
-        new_iid = ax.mutation.flow.add_node(
+        ax.mutation.flow.add_node(
             package=chosen.package_name,
             version=chosen.package_version,
-        )
-        # Wire the new tool: current AddToFlow → new tool → loop target.
-        ax.mutation.flow.add_edge(
-            src_instance=pos.current_instance,
-            dst_instance=new_iid,
-        )
-        ax.mutation.flow.add_edge(
-            src_instance=new_iid,
-            dst_instance=loop_target,
         )
     except Exception as exc:  # noqa: BLE001 — surface as a terminating ack
         ax.log.error("mutation buffer failed", error=str(exc))

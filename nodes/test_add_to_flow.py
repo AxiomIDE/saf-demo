@@ -154,9 +154,10 @@ def test_happy_path_emits_mutation(monkeypatch):
     assert ack.iteration == 3  # bumped for next loop
     # Top candidate by score wins.
     assert ctx.mutation.flow.added_nodes == [("axiom-official/http-fetch", "0.1.0")]
-    # Edges: current → new_node, new_node → loop target.
-    assert ctx.mutation.flow.added_edges[0] == (3, 5)  # parent_count=5 → new iid 5
-    assert ctx.mutation.flow.added_edges[1] == (5, 1)  # → loop target
+    # v1: orphan-add. No edges emitted — the mutation primitive's
+    # strict type-compat check on added edges would reject arbitrary
+    # tool packages here. See add_to_flow.py's design note.
+    assert ctx.mutation.flow.added_edges == []
     # History grew by one.
     assert len(list(ack.history)) == 1
     assert list(ack.history)[0].package_name == "axiom-official/http-fetch"
@@ -178,7 +179,10 @@ def test_zero_candidates_terminates_without_mutation():
     assert ctx.mutation.flow.added_edges == []
 
 
-def test_missing_loop_target_terminates():
+def test_missing_loop_target_still_succeeds_in_orphan_add_mode():
+    """v1: AddToFlow no longer wires edges (see design note), so
+    reflection's loop_edges list isn't required to be non-empty. The
+    node still emits the AddedNode and returns ok=True."""
     from nodes import add_to_flow
     from gen.messages_pb2 import (
         Candidate, ToolCandidates,
@@ -197,8 +201,10 @@ def test_missing_loop_target_terminates():
     ctx = _FakeCtx()
     ctx.reflection.loop_edges = []  # no loop in reflection
     ack = add_to_flow.add_to_flow(ctx, inp)
-    assert ack.ok is False
-    assert "loop" in ack.note.lower()
+    # Orphan-add: no edges needed, so absent loop_edges is fine.
+    assert ack.ok is True
+    assert ctx.mutation.flow.added_nodes == [("axiom-official/x", "0.1.0")]
+    assert ctx.mutation.flow.added_edges == []
 
 
 def test_history_threads_through_iterations():
