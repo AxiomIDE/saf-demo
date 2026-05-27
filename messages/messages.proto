@@ -115,3 +115,19 @@ message MutationAck {
   bool ok = 4;
   string note = 5;
 }
+
+// TerminalResult is the saf-demo seed flow's terminal output, emitted
+// by the Terminate node when LLMReasoner returns action_type=="terminate".
+// Without an explicit terminal node, no edge condition matches on the
+// terminate branch and the execution surfaces as
+// "graph produced no terminal result" → FAILED. The reasoner's
+// terminal_answer carries through here so the SPA's ResultPanel can
+// render the final answer.
+message TerminalResult {
+  string goal = 1;
+  // The reasoner's one-paragraph final answer, copied from
+  // ReasonerOut.terminal_answer.
+  string answer = 2;
+  // How many reasoner iterations were spent before terminating.
+  int32 iteration = 3;
+}

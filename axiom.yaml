@@ -46,3 +46,14 @@ nodes:
       running flow. The platform forks the execution onto a child graph
       that includes the new node, and the loop returns to LLMReasoner.
     mutation_capable: true
+
+  - name: Terminate
+    input: ReasonerOut
+    output: TerminalResult
+    description: |
+      The seed flow's terminal node. The reasoner forwards to it on the
+      action_type=="terminate" branch; without an explicit terminal,
+      the dispatch loop surfaces "graph produced no terminal result"
+      as FAILED. Copies the reasoner's terminal_answer + goal + final
+      iteration count into TerminalResult so the SPA's ResultPanel
+      can render the agent's final summary.
