@@ -1,0 +1,47 @@
+{
+  "_comment": [
+    "Recorded marketplace search results for the self-assembling-agent CI",
+    "fixture, keyed by iteration. SearchTools reads by_iteration[iter] and",
+    "returns the entries as Candidates. Pair with golden-trace.json (sibling)."
+  ],
+  "by_iteration": {
+    "1": [
+      {
+        "package_name": "axiom-official/http-fetch",
+        "version": "0.1.0",
+        "description": "Fetches an HTTP(S) URL and returns the response body.",
+        "input_message_name": "axiom_official.http_fetch.HTTPRequest",
+        "output_message_name": "axiom_official.http_fetch.HTTPResponse",
+        "score": 0.95
+      },
+      {
+        "package_name": "axiom-official/curl-runner",
+        "version": "0.4.2",
+        "description": "Wraps curl for one-off URL fetches.",
+        "input_message_name": "axiom_official.curl_runner.CurlRequest",
+        "output_message_name": "axiom_official.curl_runner.CurlResponse",
+        "score": 0.62
+      }
+    ],
+    "2": [
+      {
+        "package_name": "axiom-official/readability",
+        "version": "0.2.0",
+        "description": "Extracts main article text from raw HTML.",
+        "input_message_name": "axiom_official.readability.Document",
+        "output_message_name": "axiom_official.readability.ArticleText",
+        "score": 0.88
+      }
+    ],
+    "3": [
+      {
+        "package_name": "axiom-official/summarizer",
+        "version": "0.3.1",
+        "description": "Produces a short summary of long-form text.",
+        "input_message_name": "axiom_official.summarizer.LongText",
+        "output_message_name": "axiom_official.summarizer.Summary",
+        "score": 0.91
+      }
+    ]
+  }
+}

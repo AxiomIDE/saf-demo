@@ -1,0 +1,41 @@
+{
+  "_comment": [
+    "Recorded LLM transcript for the self-assembling-agent CI fixture.",
+    "Reference goal: 'fetch a URL, extract main text, and summarize it'.",
+    "Drives a deterministic 3-mutation lineage so the e2e fixture can assert",
+    "≥3 GRAPH_MUTATED events without paying for the real LLM call.",
+    "",
+    "The reasoner reads responses[iteration-1] per iteration. Pair with",
+    "search-trace.json (next to this file) which provides matching candidates",
+    "per iteration so AddToFlow has something to splice in."
+  ],
+  "goal": "fetch a URL, extract its main text, and summarize it",
+  "model_replayed": "claude-sonnet-4-5",
+  "responses": [
+    {
+      "action": "add_tool",
+      "need": "fetch the raw contents of an HTTP(S) URL",
+      "preferred_package": "axiom-official/http-fetch",
+      "preferred_version": "0.1.0",
+      "note": "Need raw HTML before I can extract anything."
+    },
+    {
+      "action": "add_tool",
+      "need": "extract the main article text out of HTML",
+      "preferred_package": "axiom-official/readability",
+      "preferred_version": "0.2.0",
+      "note": "Need to strip navigation, ads, footers before summarizing."
+    },
+    {
+      "action": "add_tool",
+      "need": "produce a short summary of long-form text",
+      "preferred_package": "axiom-official/summarizer",
+      "preferred_version": "0.3.1",
+      "note": "Final step: summarize the cleaned article body."
+    },
+    {
+      "action": "terminate",
+      "terminal_answer": "Flow now does fetch → extract → summarize, which covers the goal end-to-end."
+    }
+  ]
+}

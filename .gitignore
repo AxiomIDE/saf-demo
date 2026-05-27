@@ -1,0 +1,5 @@
+# Generated proto bindings — produced by `axiom build` / `axiom push`.
+gen/
+*.pyc
+__pycache__/
+.pytest_cache/

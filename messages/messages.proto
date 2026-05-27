@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package axiom_official.saf_demo;
+
+option go_package = "axiom-official/saf-demo/gen";
+
+// ReasonerIn is the input to LLMReasoner.
+//
+// The reasoner inspects the goal + the mutation history; it reads the
+// running flow's topology directly from ax.reflection.flow.* (ADR-050)
+// rather than the input message — that keeps the loop-edge adapter
+// trivial (MutationAck → ReasonerIn is just {goal, history, iteration}).
+message ReasonerIn {
+  // The user-supplied goal — what the assembling agent is trying to do.
+  string goal = 1;
+
+  // The mutation history so far — one entry per AddToFlow invocation
+  // observed by the reasoner on previous loop iterations. Appended by the
+  // AddToFlow node onto its output (carried forward through the loop).
+  repeated MutationRecord history = 2;
+
+  // The reasoner's own iteration counter (1-based). Used by the failure
+  // policy to terminate after a hard cap is reached even if the LLM
+  // never picks a terminal action.
+  int32 iteration = 3;
+}
+
+message MutationRecord {
+  // Iteration this mutation came from.
+  int32 iteration = 1;
+  // Package added by the AddToFlow node on this iteration.
+  string package_name = 2;
+  string package_version = 3;
+  // Optional human-readable note from the reasoner about why this tool
+  // was chosen.
+  string note = 4;
+}
+
+// ReasonerOut is the LLM's decision. Exactly one of `add_tool` or
+// `terminate` is populated; the seed flow branches on which oneof slot
+// is set.
+message ReasonerOut {
+  // Carried-forward fields so the next loop iteration can rebuild
+  // ReasonerIn without re-reading reflection at the LLMReasoner node
+  // itself (reflection lives on the ax.* surface).
+  string goal = 1;
+  repeated MutationRecord history = 2;
+  int32 iteration = 3;
+
+  // The action discriminator. action_type ∈ {"add_tool", "terminate"}.
+  string action_type = 4;
+
+  // Populated when action_type == "add_tool".
+  ToolSpec tool_spec = 5;
+
+  // Populated when action_type == "terminate".
+  string terminal_answer = 6;
+}
+
+// ToolSpec describes the kind of tool the reasoner wants added next.
+message ToolSpec {
+  // Carry-forward state — passes through SearchTools and AddToFlow back
+  // to the next LLMReasoner iteration.
+  string goal = 1;
+  repeated MutationRecord history = 2;
+  int32 iteration = 3;
+
+  // The natural-language need (e.g. "fetch the contents of a URL").
+  string need = 4;
+
+  // Optional explicit package@version hint when the reasoner already
+  // knows what it wants. SearchTools may still rank against this.
+  string preferred_package = 5;
+  string preferred_version = 6;
+
+  // Optional human-readable note explaining the choice. Stored in
+  // MutationRecord.note after AddToFlow runs so the reasoner can read
+  // its own rationale on the next iteration.
+  string note = 7;
+}
+
+// ToolCandidates is SearchTools's output — a ranked list of packages
+// matching the reasoner's spec.
+message ToolCandidates {
+  // Carry-forward state.
+  string goal = 1;
+  repeated MutationRecord history = 2;
+  int32 iteration = 3;
+  string note = 4;
+
+  // The original spec (for downstream visibility).
+  string need = 5;
+
+  repeated Candidate candidates = 6;
+}
+
+message Candidate {
+  string package_name = 1;
+  string package_version = 2;
+  string description = 3;
+  string input_message_name = 4;
+  string output_message_name = 5;
+  // 0..1 — higher is better match.
+  float score = 6;
+}
+
+// MutationAck is AddToFlow's output. The platform reads
+// NodeResponse.mutation_batch (attached by ax.mutation.flow.*) and
+// forks the execution; this message is what the SDK returns to the
+// downstream loop edge so the next LLMReasoner iteration has context.
+message MutationAck {
+  string goal = 1;
+  repeated MutationRecord history = 2;
+  int32 iteration = 3;
+  bool ok = 4;
+  string note = 5;
+}

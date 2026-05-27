@@ -1,0 +1,48 @@
+name: axiom-official/saf-demo
+version: 0.1.0
+language: python
+description: |
+  Self-Assembling Agent demo (EPIC-SAF-003 / ADR-051 / ADR-052).
+  A seed flow with an LLM reasoner, a marketplace search node, and a
+  mutation-emitting "AddToFlow" node that grows the graph in response
+  to a goal. Used to demonstrate the live-lineage canvas mode.
+author: Axiom Official
+license: MIT
+tags:
+  - demo
+  - self-assembling
+  - llm
+  - mutation
+  - agentic
+
+nodes:
+  - name: LLMReasoner
+    input: ReasonerIn
+    output: ReasonerOut
+    description: |
+      Reads the goal + a reflection snapshot of the running flow + the
+      mutation history so far, and decides whether to (a) request a new
+      tool be added via SearchTools+AddToFlow or (b) terminate with a
+      final answer. Mutation-capable is false: this node only proposes;
+      the AddToFlow node actually emits MutationBatch.
+    required_secrets:
+      - ANTHROPIC_API_KEY
+
+  - name: SearchTools
+    input: ToolSpec
+    output: ToolCandidates
+    description: |
+      Queries the marketplace registry for nodes matching the reasoner's
+      tool spec. Returns up to N candidate packages with their ULIDs and
+      input/output message types so the downstream AddToFlow node can
+      attach the highest-ranked match into the flow.
+
+  - name: AddToFlow
+    input: ToolCandidates
+    output: MutationAck
+    description: |
+      The mutation emitter. Picks the top candidate from SearchTools and
+      calls ax.mutation.flow.add_node + add_edge to splice it into the
+      running flow. The platform forks the execution onto a child graph
+      that includes the new node, and the loop returns to LLMReasoner.
+    mutation_capable: true

@@ -1,0 +1,103 @@
+{
+  "name": "self-assembling-agent",
+  "description": "Seed flow for the self-assembling agent demo (ADR-051 + ADR-052). LLMReasoner inspects the goal + reflection + history, branches to (SearchTools → AddToFlow → loop) or terminates. AddToFlow is the sole mutation_capable node; each successful AddToFlow invocation forks the execution onto a child graph that includes the freshly added tool.",
+  "nodes": [
+    {
+      "id": "node-reasoner",
+      "type": "axiomNode",
+      "position": { "x": 0, "y": 0 },
+      "data": {
+        "nodeUlid": "{{ LLM_REASONER_ULID }}",
+        "nodeType": "node",
+        "packageName": "axiom-official/saf-demo",
+        "packageVersion": "0.1.0",
+        "nodeName": "LLMReasoner",
+        "inputMessageName": "axiom_official.saf_demo.ReasonerIn",
+        "outputMessageName": "axiom_official.saf_demo.ReasonerOut"
+      }
+    },
+    {
+      "id": "node-search",
+      "type": "axiomNode",
+      "position": { "x": 300, "y": 0 },
+      "data": {
+        "nodeUlid": "{{ SEARCH_TOOLS_ULID }}",
+        "nodeType": "node",
+        "packageName": "axiom-official/saf-demo",
+        "packageVersion": "0.1.0",
+        "nodeName": "SearchTools",
+        "inputMessageName": "axiom_official.saf_demo.ToolSpec",
+        "outputMessageName": "axiom_official.saf_demo.ToolCandidates"
+      }
+    },
+    {
+      "id": "node-add",
+      "type": "axiomNode",
+      "position": { "x": 600, "y": 0 },
+      "data": {
+        "nodeUlid": "{{ ADD_TO_FLOW_ULID }}",
+        "nodeType": "node",
+        "packageName": "axiom-official/saf-demo",
+        "packageVersion": "0.1.0",
+        "nodeName": "AddToFlow",
+        "inputMessageName": "axiom_official.saf_demo.ToolCandidates",
+        "outputMessageName": "axiom_official.saf_demo.MutationAck"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-reasoner-to-search",
+      "source": "node-reasoner",
+      "target": "node-search",
+      "data": {
+        "srcMessage": "axiom_official.saf_demo.ReasonerOut",
+        "dstMessage": "axiom_official.saf_demo.ToolSpec",
+        "adapter": {
+          "goal": "tool_spec.goal",
+          "history": "tool_spec.history",
+          "iteration": "tool_spec.iteration",
+          "need": "tool_spec.need",
+          "preferred_package": "tool_spec.preferred_package",
+          "preferred_version": "tool_spec.preferred_version",
+          "note": "tool_spec.note"
+        },
+        "condition": { "op": "EQ", "field": "action_type", "value": "add_tool" }
+      }
+    },
+    {
+      "id": "edge-search-to-add",
+      "source": "node-search",
+      "target": "node-add",
+      "data": {
+        "srcMessage": "axiom_official.saf_demo.ToolCandidates",
+        "dstMessage": "axiom_official.saf_demo.ToolCandidates",
+        "adapter": {
+          "goal": "goal",
+          "history": "history",
+          "iteration": "iteration",
+          "note": "note",
+          "need": "need",
+          "candidates": "candidates"
+        }
+      }
+    },
+    {
+      "id": "edge-add-to-reasoner-loop",
+      "source": "node-add",
+      "target": "node-reasoner",
+      "data": {
+        "srcMessage": "axiom_official.saf_demo.MutationAck",
+        "dstMessage": "axiom_official.saf_demo.ReasonerIn",
+        "adapter": {
+          "goal": "goal",
+          "history": "history",
+          "iteration": "iteration"
+        },
+        "condition": { "op": "EQ", "field": "ok", "value": "true" },
+        "is_loop": true,
+        "max_iterations": 8
+      }
+    }
+  ]
+}
