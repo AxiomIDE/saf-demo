@@ -30,7 +30,7 @@ def _fake_gen(monkeypatch, tmp_path):
     import types
 
     gen = types.ModuleType("gen")
-    messages = types.ModuleType("gen.axiom_official_saf_demo_messages_pb2")
+    messages = types.ModuleType("gen.messages_pb2")
     axiom_context = types.ModuleType("gen.axiom_context")
 
     class _Repeated(list):
@@ -93,7 +93,7 @@ def _fake_gen(monkeypatch, tmp_path):
     axiom_context.AxiomContext = AxiomContext
 
     monkeypatch.setitem(sys.modules, "gen", gen)
-    monkeypatch.setitem(sys.modules, "gen.axiom_official_saf_demo_messages_pb2", messages)
+    monkeypatch.setitem(sys.modules, "gen.messages_pb2", messages)
     monkeypatch.setitem(sys.modules, "gen.axiom_context", axiom_context)
     yield
 
@@ -137,6 +137,44 @@ def _make_input(messages_mod, goal="goal-x", iteration=1, history=()):
     return inp
 
 
+def test_stub_secret_takes_priority_over_path(monkeypatch, tmp_path):
+    """When both the tenant-secret stub AND the file-path stub are set
+    the secret wins. This is the path the e2e-gate suite exercises."""
+    secret_transcript = {
+        "responses": [{"action": "terminate", "terminal_answer": "from secret"}],
+    }
+    p = tmp_path / "trace.json"
+    p.write_text(json.dumps({"responses": [
+        {"action": "terminate", "terminal_answer": "from file"}
+    ]}))
+    monkeypatch.setenv("AXIOM_LLM_STUB_PATH", str(p))
+
+    from nodes import llm_reasoner
+    from gen.messages_pb2 import ReasonerIn
+
+    ctx = _FakeCtx(secrets=_FakeSecrets({"AXIOM_LLM_STUB_JSON": json.dumps(secret_transcript)}))
+    inp = ReasonerIn()
+    inp.iteration = 1
+    out = llm_reasoner.llm_reasoner(ctx, inp)
+    assert out.terminal_answer == "from secret"
+
+
+def test_stub_secret_bad_json_terminates(monkeypatch):
+    """A malformed secret value collapses to a terminate decision rather
+    than crashing the node — same shape as the file-path error case."""
+    monkeypatch.delenv("AXIOM_LLM_STUB_PATH", raising=False)
+
+    from nodes import llm_reasoner
+    from gen.messages_pb2 import ReasonerIn
+
+    ctx = _FakeCtx(secrets=_FakeSecrets({"AXIOM_LLM_STUB_JSON": "{not json"}))
+    inp = ReasonerIn()
+    inp.iteration = 1
+    out = llm_reasoner.llm_reasoner(ctx, inp)
+    assert out.action_type == "terminate"
+    assert "stub parse failed" in out.terminal_answer.lower()
+
+
 def test_stub_mode_add_tool(monkeypatch, tmp_path):
     """Stub mode returns the add_tool decision for iteration 1."""
     transcript = {
@@ -156,7 +194,7 @@ def test_stub_mode_add_tool(monkeypatch, tmp_path):
     monkeypatch.setenv("AXIOM_LLM_STUB_PATH", str(p))
 
     from nodes import llm_reasoner
-    from gen.axiom_official_saf_demo_messages_pb2 import ReasonerIn
+    from gen.messages_pb2 import ReasonerIn
 
     ctx = _FakeCtx()
     inp = ReasonerIn()
@@ -183,7 +221,7 @@ def test_stub_mode_terminate(monkeypatch, tmp_path):
     monkeypatch.setenv("AXIOM_LLM_STUB_PATH", str(p))
 
     from nodes import llm_reasoner
-    from gen.axiom_official_saf_demo_messages_pb2 import ReasonerIn
+    from gen.messages_pb2 import ReasonerIn
 
     inp = ReasonerIn()
     inp.goal = "summarize"
@@ -202,7 +240,7 @@ def test_stub_mode_exhausted_terminates(monkeypatch, tmp_path):
     monkeypatch.setenv("AXIOM_LLM_STUB_PATH", str(p))
 
     from nodes import llm_reasoner
-    from gen.axiom_official_saf_demo_messages_pb2 import ReasonerIn
+    from gen.messages_pb2 import ReasonerIn
 
     inp = ReasonerIn()
     inp.goal = "x"
@@ -221,7 +259,7 @@ def test_iteration_cap_overrides_stub(monkeypatch, tmp_path):
     monkeypatch.setenv("AXIOM_LLM_STUB_PATH", str(p))
 
     from nodes import llm_reasoner
-    from gen.axiom_official_saf_demo_messages_pb2 import ReasonerIn
+    from gen.messages_pb2 import ReasonerIn
 
     inp = ReasonerIn()
     inp.goal = "y"
@@ -236,7 +274,7 @@ def test_no_api_key_terminates_in_live_mode(monkeypatch):
     monkeypatch.delenv("AXIOM_LLM_STUB_PATH", raising=False)
 
     from nodes import llm_reasoner
-    from gen.axiom_official_saf_demo_messages_pb2 import ReasonerIn
+    from gen.messages_pb2 import ReasonerIn
 
     inp = ReasonerIn()
     inp.goal = "anything"

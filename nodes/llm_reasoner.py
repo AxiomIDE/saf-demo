@@ -12,11 +12,18 @@ Two execution modes:
      the tenant-secret ``ANTHROPIC_API_KEY``. Cost/latency budget is
      documented in ../README.md.
 
-  2. **Stub mode** (CI). When the env var ``AXIOM_LLM_STUB_PATH`` is
-     set to a JSON file path, the node reads a canned transcript and
-     returns the response matching the current iteration. The
-     transcript shape is documented next to the file
-     (``testdata/golden-trace.json``).
+  2. **Stub mode** (CI / e2e). The reasoner replays a canned transcript
+     when either of these is set, in priority order:
+
+       - tenant secret ``AXIOM_LLM_STUB_JSON`` — the *content* of the
+         transcript, registered via ``POST /v1/secrets``. Preferred by
+         the e2e-gate suite because it requires no container-side
+         state.
+       - env var ``AXIOM_LLM_STUB_PATH`` — a *file path* the node
+         container can read. Convenient for ``axiom dev`` work where
+         the file is mounted into the workspace.
+
+     Transcript shape: see ``testdata/golden-trace.json``.
 
 Failure policy when the LLM proposes a tool that SearchTools cannot
 find (resolved one iteration later) is implemented downstream by
@@ -29,7 +36,7 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
-from gen.axiom_official_saf_demo_messages_pb2 import (
+from gen.messages_pb2 import (
     MutationRecord,
     ReasonerIn,
     ReasonerOut,
@@ -160,17 +167,53 @@ def _terminate(input: ReasonerIn, iteration: int, answer: str) -> ReasonerOut:
 
 
 def _decide(ax: AxiomContext, input: ReasonerIn, iteration: int) -> Dict[str, Any]:
-    """Return the parsed JSON decision from either the stub or the live LLM."""
+    """Return the parsed JSON decision from either a stub or the live LLM.
+
+    Stub-source priority: ``AXIOM_LLM_STUB_JSON`` (tenant secret carrying
+    the trace contents) wins; ``AXIOM_LLM_STUB_PATH`` (env var pointing
+    at a file) is the fallback. Live LLM call only if neither is set.
+    """
+    stub_json, ok = _safe_secret(ax, "AXIOM_LLM_STUB_JSON")
+    if ok and stub_json.strip():
+        return _decide_from_stub_text(ax, stub_json, iteration, source="secret")
+
     stub_path = os.environ.get("AXIOM_LLM_STUB_PATH", "").strip()
     if stub_path:
-        return _decide_from_stub(ax, stub_path, input, iteration)
+        try:
+            with open(stub_path, "r") as f:
+                text = f.read()
+        except OSError as exc:
+            ax.log.error("failed to load LLM stub file", path=stub_path, error=str(exc))
+            return {
+                "action": "terminate",
+                "terminal_answer": f"stub load failed: {exc}",
+            }
+        return _decide_from_stub_text(ax, text, iteration, source=f"file:{stub_path}")
+
     return _decide_from_anthropic(ax, input, iteration)
 
 
-def _decide_from_stub(
-    ax: AxiomContext, path: str, input: ReasonerIn, iteration: int
+def _safe_secret(ax: AxiomContext, name: str) -> tuple:
+    """Wrap ax.secrets.get so a missing-secret path can't raise. Returns
+    (value, ok) — same contract as the SDK protocol."""
+    try:
+        v = ax.secrets.get(name)
+    except Exception:  # noqa: BLE001
+        return ("", False)
+    if isinstance(v, tuple) and len(v) == 2:
+        return v
+    # Defensive: if a future SDK shape changes the return type, treat
+    # any truthy non-empty value as success.
+    if v:
+        return (str(v), True)
+    return ("", False)
+
+
+def _decide_from_stub_text(
+    ax: AxiomContext, text: str, iteration: int, source: str
 ) -> Dict[str, Any]:
-    """Replay a recorded transcript. The file is a JSON object of the form::
+    """Replay a recorded transcript supplied as raw JSON text. The text
+    is a JSON object of the form::
 
         {
           "goal": "<reference goal string>",
@@ -182,27 +225,32 @@ def _decide_from_stub(
           ]
         }
 
-    Iteration N (1-based) takes responses[N-1]. If the file ends before
-    the iteration arrives, the reasoner terminates with a corrective
-    note — this is the same shape as the live-mode failure path.
+    Iteration N (1-based) takes responses[N-1]. If the transcript ends
+    before the iteration arrives, the reasoner terminates with a
+    corrective note — this is the same shape as the live-mode failure
+    path.
     """
     try:
-        with open(path, "r") as f:
-            trace = json.load(f)
-    except (OSError, json.JSONDecodeError) as exc:
-        ax.log.error("failed to load LLM stub transcript", path=path, error=str(exc))
-        return {"action": "terminate", "terminal_answer": f"stub load failed: {exc}"}
+        trace = json.loads(text)
+    except json.JSONDecodeError as exc:
+        ax.log.error("LLM stub text not valid JSON", source=source, error=str(exc))
+        return {"action": "terminate", "terminal_answer": f"stub parse failed: {exc}"}
 
     responses: List[Dict[str, Any]] = list(trace.get("responses") or [])
     idx = iteration - 1
     if idx < 0 or idx >= len(responses):
-        ax.log.warn("stub transcript exhausted", iteration=iteration, available=len(responses))
+        ax.log.warn(
+            "stub transcript exhausted",
+            iteration=iteration,
+            available=len(responses),
+            source=source,
+        )
         return {
             "action": "terminate",
             "terminal_answer": f"Stub transcript has no response for iteration {iteration}.",
         }
 
-    ax.log.info("reasoner using stub response", iteration=iteration, path=path)
+    ax.log.info("reasoner using stub response", iteration=iteration, source=source)
     return dict(responses[idx])
 
 

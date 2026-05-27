@@ -19,7 +19,7 @@ def _fake_gen(monkeypatch):
     """Same fake-`gen` machinery as test_llm_reasoner — see that file for context."""
 
     gen = types.ModuleType("gen")
-    messages = types.ModuleType("gen.axiom_official_saf_demo_messages_pb2")
+    messages = types.ModuleType("gen.messages_pb2")
     axiom_context = types.ModuleType("gen.axiom_context")
 
     class _Repeated(list):
@@ -72,7 +72,7 @@ def _fake_gen(monkeypatch):
     axiom_context.AxiomContext = AxiomContext
 
     monkeypatch.setitem(sys.modules, "gen", gen)
-    monkeypatch.setitem(sys.modules, "gen.axiom_official_saf_demo_messages_pb2", messages)
+    monkeypatch.setitem(sys.modules, "gen.messages_pb2", messages)
     monkeypatch.setitem(sys.modules, "gen.axiom_context", axiom_context)
     yield
 
@@ -86,9 +86,69 @@ class _FakeLog:
     def error(self, msg, **a): self._log("error", msg, **a)
 
 
+class _FakeSecrets:
+    def __init__(self, mapping=None):
+        self._m = mapping or {}
+
+    def get(self, name):
+        v = self._m.get(name)
+        if v is None:
+            return ("", False)
+        return (v, True)
+
+
 class _FakeCtx:
-    def __init__(self):
+    def __init__(self, secrets=None):
         self.log = _FakeLog()
+        self.secrets = secrets or _FakeSecrets()
+
+
+def test_stub_secret_takes_priority_over_path_and_registry(monkeypatch, tmp_path):
+    """When AXIOM_SEARCH_STUB_JSON is set on the tenant secret store the
+    node ignores the env-var path AND the REGISTRY_URL. This is the
+    path the e2e-gate suite drives."""
+    secret_trace = {
+        "by_iteration": {
+            "1": [
+                {"package_name": "from-secret/pkg", "version": "9.9.9", "score": 1.0}
+            ]
+        }
+    }
+    p = tmp_path / "trace.json"
+    p.write_text(json.dumps({"by_iteration": {"1": [{"package_name": "from-file/pkg"}]}}))
+    monkeypatch.setenv("AXIOM_SEARCH_STUB_PATH", str(p))
+    monkeypatch.setenv("REGISTRY_URL", "http://example.invalid")
+
+    from nodes import search_tools
+    from gen.messages_pb2 import ToolSpec
+
+    ctx = _FakeCtx(secrets=_FakeSecrets({
+        "AXIOM_SEARCH_STUB_JSON": json.dumps(secret_trace),
+    }))
+    spec = ToolSpec()
+    spec.iteration = 1
+    spec.need = "x"
+    out = search_tools.search_tools(ctx, spec)
+    assert len(out.candidates) == 1
+    assert out.candidates[0].package_name == "from-secret/pkg"
+
+
+def test_stub_secret_bad_json_returns_empty(monkeypatch):
+    """A malformed secret value returns an empty candidate list and
+    logs an error, rather than raising into the worker."""
+    monkeypatch.delenv("AXIOM_SEARCH_STUB_PATH", raising=False)
+    monkeypatch.delenv("REGISTRY_URL", raising=False)
+
+    from nodes import search_tools
+    from gen.messages_pb2 import ToolSpec
+
+    ctx = _FakeCtx(secrets=_FakeSecrets({"AXIOM_SEARCH_STUB_JSON": "{garbage"}))
+    spec = ToolSpec()
+    spec.iteration = 1
+    spec.need = "x"
+    out = search_tools.search_tools(ctx, spec)
+    assert list(out.candidates) == []
+    assert any(rec[0] == "error" for rec in ctx.log.records)
 
 
 def test_stub_mode_returns_candidates_for_iteration(monkeypatch, tmp_path):
@@ -109,7 +169,7 @@ def test_stub_mode_returns_candidates_for_iteration(monkeypatch, tmp_path):
     monkeypatch.delenv("REGISTRY_URL", raising=False)
 
     from nodes import search_tools
-    from gen.axiom_official_saf_demo_messages_pb2 import ToolSpec
+    from gen.messages_pb2 import ToolSpec
 
     spec = ToolSpec()
     spec.goal = "g"
@@ -129,7 +189,7 @@ def test_stub_mode_missing_iteration_returns_empty(monkeypatch, tmp_path):
     monkeypatch.delenv("REGISTRY_URL", raising=False)
 
     from nodes import search_tools
-    from gen.axiom_official_saf_demo_messages_pb2 import ToolSpec
+    from gen.messages_pb2 import ToolSpec
 
     spec = ToolSpec()
     spec.iteration = 7
@@ -143,7 +203,7 @@ def test_degraded_mode_no_env_returns_empty(monkeypatch):
     monkeypatch.delenv("REGISTRY_URL", raising=False)
 
     from nodes import search_tools
-    from gen.axiom_official_saf_demo_messages_pb2 import ToolSpec
+    from gen.messages_pb2 import ToolSpec
 
     spec = ToolSpec()
     spec.iteration = 1
@@ -169,7 +229,7 @@ def test_registry_call_failure_returns_empty(monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", _boom)
 
-    from gen.axiom_official_saf_demo_messages_pb2 import ToolSpec
+    from gen.messages_pb2 import ToolSpec
     spec = ToolSpec()
     spec.iteration = 1
     spec.need = "z"
@@ -221,7 +281,7 @@ def test_registry_call_happy_path(monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout=None: _Resp(body))
 
-    from gen.axiom_official_saf_demo_messages_pb2 import ToolSpec
+    from gen.messages_pb2 import ToolSpec
     spec = ToolSpec()
     spec.iteration = 1
     spec.need = "fetch"

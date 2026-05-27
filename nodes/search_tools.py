@@ -7,20 +7,19 @@
 # same mechanism the reasoner uses.
 """SearchTools — resolves a ToolSpec into a ranked list of marketplace candidates.
 
-Modes:
+Modes (priority order):
 
-  - **Stub mode**: when ``AXIOM_SEARCH_STUB_PATH`` is set the node
-    returns the canned candidates from that file. Keyed by ``iteration``
-    so the demo's recorded transcript can drive both the reasoner and
-    the search step from a single pair of files.
-
-  - **Live mode**: when ``REGISTRY_URL`` is set (typically the in-tenant
-    registry host) the node queries ``GET /packages/search?q=...`` and
-    materializes the top N matches as Candidates.
-
-  - **Degraded mode**: if neither is configured, returns an empty list.
-    Downstream AddToFlow detects zero candidates and terminates the
-    agent with a corrective note rather than emitting a mutation.
+  - **Stub mode (secret)**: tenant secret ``AXIOM_SEARCH_STUB_JSON``
+    carries the transcript content. Preferred by the e2e-gate suite —
+    no container-side state required.
+  - **Stub mode (file)**: env var ``AXIOM_SEARCH_STUB_PATH`` points at
+    a JSON file the node container can read. Convenient for
+    ``axiom dev`` workflows.
+  - **Live mode**: env var ``REGISTRY_URL`` set => the node queries
+    ``GET /packages/search?q=...`` and materializes top N matches.
+  - **Degraded mode**: nothing configured => empty list. Downstream
+    AddToFlow detects zero candidates and terminates the agent with a
+    corrective note instead of emitting a mutation.
 """
 from __future__ import annotations
 
@@ -30,7 +29,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Dict, List
 
-from gen.axiom_official_saf_demo_messages_pb2 import (
+from gen.messages_pb2 import (
     Candidate,
     ToolCandidates,
     ToolSpec,
@@ -50,14 +49,20 @@ def search_tools(ax: AxiomContext, input: ToolSpec) -> ToolCandidates:
     out.need = input.need
     out.note = input.note
 
+    stub_secret, ok = _safe_secret(ax, "AXIOM_SEARCH_STUB_JSON")
     stub_path = os.environ.get("AXIOM_SEARCH_STUB_PATH", "").strip()
-    if stub_path:
-        candidates = _candidates_from_stub(ax, stub_path, input)
-    elif os.environ.get("REGISTRY_URL", "").strip():
+    registry_url = os.environ.get("REGISTRY_URL", "").strip()
+
+    if ok and stub_secret.strip():
+        candidates = _candidates_from_stub_text(ax, stub_secret, input, source="secret")
+    elif stub_path:
+        candidates = _candidates_from_stub_file(ax, stub_path, input)
+    elif registry_url:
         candidates = _candidates_from_registry(ax, input)
     else:
         ax.log.warn(
-            "SearchTools degraded: no REGISTRY_URL or AXIOM_SEARCH_STUB_PATH configured"
+            "SearchTools degraded: no REGISTRY_URL, AXIOM_SEARCH_STUB_JSON, "
+            "or AXIOM_SEARCH_STUB_PATH configured"
         )
         candidates = []
 
@@ -73,7 +78,32 @@ def search_tools(ax: AxiomContext, input: ToolSpec) -> ToolCandidates:
     return out
 
 
-def _candidates_from_stub(
+def _safe_secret(ax: AxiomContext, name: str) -> tuple:
+    """Wrap ax.secrets.get so a missing-secret path can't raise."""
+    try:
+        v = ax.secrets.get(name)
+    except Exception:  # noqa: BLE001
+        return ("", False)
+    if isinstance(v, tuple) and len(v) == 2:
+        return v
+    if v:
+        return (str(v), True)
+    return ("", False)
+
+
+def _candidates_from_stub_text(
+    ax: AxiomContext, text: str, input: ToolSpec, source: str
+) -> List[Candidate]:
+    """Parse stub text directly and return candidates for the current iteration."""
+    try:
+        trace = json.loads(text)
+    except json.JSONDecodeError as exc:
+        ax.log.error("search stub text not valid JSON", source=source, error=str(exc))
+        return []
+    return _materialize_candidates(ax, trace, input, source=source)
+
+
+def _candidates_from_stub_file(
     ax: AxiomContext, path: str, input: ToolSpec
 ) -> List[Candidate]:
     """Replay candidates from a JSON file. Same iteration key as the LLM stub."""
@@ -83,7 +113,12 @@ def _candidates_from_stub(
     except (OSError, json.JSONDecodeError) as exc:
         ax.log.error("failed to load search stub", path=path, error=str(exc))
         return []
+    return _materialize_candidates(ax, trace, input, source=f"file:{path}")
 
+
+def _materialize_candidates(
+    ax: AxiomContext, trace: Dict[str, Any], input: ToolSpec, source: str
+) -> List[Candidate]:
     by_iter: Dict[str, Any] = dict(trace.get("by_iteration") or {})
     raw = by_iter.get(str(input.iteration), [])
     if not isinstance(raw, list):
@@ -91,6 +126,7 @@ def _candidates_from_stub(
             "search stub entry not a list",
             iteration=input.iteration,
             kind=type(raw).__name__,
+            source=source,
         )
         return []
 

@@ -16,7 +16,7 @@ sys.path.insert(0, str(HERE.parent))
 @pytest.fixture(autouse=True)
 def _fake_gen(monkeypatch):
     gen = types.ModuleType("gen")
-    messages = types.ModuleType("gen.axiom_official_saf_demo_messages_pb2")
+    messages = types.ModuleType("gen.messages_pb2")
     axiom_context = types.ModuleType("gen.axiom_context")
 
     class _Repeated(list):
@@ -66,7 +66,7 @@ def _fake_gen(monkeypatch):
     axiom_context.AxiomContext = AxiomContext
 
     monkeypatch.setitem(sys.modules, "gen", gen)
-    monkeypatch.setitem(sys.modules, "gen.axiom_official_saf_demo_messages_pb2", messages)
+    monkeypatch.setitem(sys.modules, "gen.messages_pb2", messages)
     monkeypatch.setitem(sys.modules, "gen.axiom_context", axiom_context)
     yield
 
@@ -131,7 +131,7 @@ def _candidate(messages_mod, name, version, score):
 
 def test_happy_path_emits_mutation(monkeypatch):
     from nodes import add_to_flow
-    from gen.axiom_official_saf_demo_messages_pb2 import (
+    from gen.messages_pb2 import (
         Candidate, ToolCandidates,
     )
 
@@ -141,9 +141,9 @@ def test_happy_path_emits_mutation(monkeypatch):
     inp.need = "fetch a URL"
     inp.note = "need http"
     inp.candidates.extend([
-        _candidate(sys.modules["gen.axiom_official_saf_demo_messages_pb2"],
+        _candidate(sys.modules["gen.messages_pb2"],
                    "axiom-official/curl", "0.2.0", 0.4),
-        _candidate(sys.modules["gen.axiom_official_saf_demo_messages_pb2"],
+        _candidate(sys.modules["gen.messages_pb2"],
                    "axiom-official/http-fetch", "0.1.0", 0.91),
     ])
 
@@ -164,7 +164,7 @@ def test_happy_path_emits_mutation(monkeypatch):
 
 def test_zero_candidates_terminates_without_mutation():
     from nodes import add_to_flow
-    from gen.axiom_official_saf_demo_messages_pb2 import ToolCandidates
+    from gen.messages_pb2 import ToolCandidates
 
     inp = ToolCandidates()
     inp.iteration = 1
@@ -180,7 +180,7 @@ def test_zero_candidates_terminates_without_mutation():
 
 def test_missing_loop_target_terminates():
     from nodes import add_to_flow
-    from gen.axiom_official_saf_demo_messages_pb2 import (
+    from gen.messages_pb2 import (
         Candidate, ToolCandidates,
     )
 
@@ -188,7 +188,7 @@ def test_missing_loop_target_terminates():
     inp.iteration = 1
     inp.need = "x"
     c = inp.candidates
-    one = sys.modules["gen.axiom_official_saf_demo_messages_pb2"].Candidate()
+    one = sys.modules["gen.messages_pb2"].Candidate()
     one.package_name = "axiom-official/x"
     one.package_version = "0.1.0"
     one.score = 0.5
@@ -205,7 +205,7 @@ def test_history_threads_through_iterations():
     """The reasoner's MutationRecord list passes through unmodified
     except for the new entry appended on each successful AddToFlow."""
     from nodes import add_to_flow
-    from gen.axiom_official_saf_demo_messages_pb2 import (
+    from gen.messages_pb2 import (
         Candidate, MutationRecord, ToolCandidates,
     )
 
@@ -215,7 +215,7 @@ def test_history_threads_through_iterations():
     inp.note = "step-3-rationale"
     inp.history.append(MutationRecord(iteration=1, package_name="a/b", package_version="0.1.0"))
     inp.history.append(MutationRecord(iteration=2, package_name="c/d", package_version="0.2.0"))
-    c = sys.modules["gen.axiom_official_saf_demo_messages_pb2"].Candidate()
+    c = sys.modules["gen.messages_pb2"].Candidate()
     c.package_name = "e/f"
     c.package_version = "0.3.0"
     c.score = 0.7

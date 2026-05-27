@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from gen.axiom_official_saf_demo_messages_pb2 import (
+from gen.messages_pb2 import (
     Candidate,
     MutationAck,
     MutationRecord,
